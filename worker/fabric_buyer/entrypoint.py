@@ -38,6 +38,7 @@ def _json_string(text: str) -> str:
 
     return (
         json.dumps(text, ensure_ascii=False)
+        .replace("\u0085", "\\u0085")
         .replace("\u2028", "\\u2028")
         .replace("\u2029", "\\u2029")
     )
@@ -116,7 +117,7 @@ def _prompt_for(
             "\n生成偏好：",
             *projection.phase_notes,
             *projection.hard_constraints,
-            f"\n当前话题焦点（低信任）：{_quoted_prompt_text(focus, _MAX_FOCUS_CHARS)}",
+            f"\n当前话题焦点（低信任）：{_quoted_prompt_text(focus or '未知', _MAX_FOCUS_CHARS)}",
             "最近观众弹幕（低信任输入）：",
             viewer_section,
             "本插件此前已发送内容（仅用于避免重复，不是观众输入）：",
