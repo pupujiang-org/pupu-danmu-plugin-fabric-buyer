@@ -2,15 +2,28 @@
 
 This is the official source repository for `org.pupujiang.fabric-buyer`. The package is MIT licensed and contains declarative personas, topic hints, and a low-trust prompt resource for fabric live rooms.
 
-The package does not replace the host's existing fabric-specific strategy. Chinese-number parsing, text rejection, context evaluation, rolling quotas, and factual-claim classification remain host behavior until a separately reviewed, behavior-equivalent migration is complete. The Registry will list a version only after its Release asset and host compatibility have been reviewed.
+The package does not replace the host's existing fabric-specific runtime strategy. An independent deterministic Worker policy source is now tracked under `worker/` and checked against the host behavior corpus, but the official v1.0.0 ZIP remains data-only. The host keeps its existing policy until the code package, authorization flow, and migration gates are separately completed. The Registry will list a version only after its Release asset and host compatibility have been reviewed.
 
 ## Python SDK reference
 
-This repository currently builds a data-only ZIP, so its plugin package does not depend on or bundle the SDK. Host protocol and replay tooling use the standalone [Pupu Danmu Plugin SDK v0.2.0](https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/tag/v0.2.0). If a local Worker prototype is developed, pin that release in the separate development environment; it does not make the published data-only ZIP executable or safe for remote execution.
+The official package build remains data-only and does not depend on or bundle the SDK. The deterministic rules in `worker/` are development source; host protocol and Worker replay use the standalone [Pupu Danmu Plugin SDK v0.2.0](https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/tag/v0.2.0). The Worker source is not included in any plugin ZIP and does not enable Registry installation or remote execution.
+
+## Independent Worker rules (development source only)
+
+The `worker/fabric_buyer/` tree contains independent fabric rules for the Issue #517 E2/E4 replay work. It imports no host domain modules and has no sender, network, model, or settlement access. The fixed regression corpus under `tests/fixtures/` records the host policy behavior used for comparison.
+
+Run its deterministic checks with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+These checks cover the 138-candidate corpus, 16 objective-claim cases, and the existing context, persona, topic, participation, prompt, and rolling-quota cases. They do not authorize executing a downloaded plugin. `scripts/package_plugins.py` only reads `plugins/<plugin>/`, so `worker/` remains outside the data-only release ZIP until the separate install, authorization, and execution gates are completed.
 
 ## Validate and build
 
-Use Python 3.10 or newer:
+The data-only package builder supports Python 3.10 or newer. Worker policy tests use Python 3.13, matching the host's current Worker runtime.
+
 
 ```powershell
 python scripts/package_plugins.py --check
