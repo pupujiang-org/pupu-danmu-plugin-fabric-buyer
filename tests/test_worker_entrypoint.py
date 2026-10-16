@@ -11,6 +11,7 @@ from pupu_danmu_plugin_sdk.protocol import (
     Invocation,
     Opportunity,
     OpportunityMode,
+    PluginProtocolError,
     SelfSentMessage,
     SessionFocus,
     Silent,
@@ -23,12 +24,19 @@ from pupu_danmu_plugin_sdk.replay import ReplayHarness
 
 from worker.fabric_buyer.entrypoint import run
 
+#: The host broker and both SDK LLM ports reject prompts above this size.
+_MAX_PROMPT_CHARS = 16_000
+#: The SDK's per-message text cap for viewer and self-sent text.
+_MAX_TEXT_CHARS = 4_000
+
 
 def _invocation(
     *,
     available: bool = True,
     mode: OpportunityMode = OpportunityMode.CONTEXTUAL_FOLLOWUP,
     viewer_texts: tuple[str, ...] = ("做衬衫可以吗？",),
+    self_sent_texts: tuple[str, ...] = ("颜色怎么样？",),
+    focus: str | None = None,
 ) -> Invocation:
     observed_at = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
     messages = tuple(
@@ -42,10 +50,13 @@ def _invocation(
         capture_id="capture-1",
         revision=1,
         viewer_chat=ViewerChatSnapshot(messages),
-        session_focus=SessionFocus(current_focus="衬衫" if viewer_texts else ""),
+        session_focus=SessionFocus(
+            current_focus=focus if focus is not None else ("衬衫" if viewer_texts else "")
+        ),
         opportunity=Opportunity(mode=mode, available=available),
-        recent_self_sent=(
-            SelfSentMessage("颜色怎么样？", datetime(2026, 10, 16, 7, 59, tzinfo=UTC)),
+        recent_self_sent=tuple(
+            SelfSentMessage(text, datetime(2026, 10, 16, 7, 59, tzinfo=UTC))
+            for text in self_sent_texts
         ),
     )
 
@@ -104,6 +115,120 @@ class FabricWorkerEntrypointTests(unittest.TestCase):
         self.assertIn("usage:发圈", outcome.semantic_tags)
         self.assertIn("安全主动", llm.prompts[0])
         self.assertNotIn("做衬衫可以吗？", llm.prompts[0])
+
+
+def _viewer_lines(prompt: str) -> list[str]:
+    section = prompt.split("最近观众弹幕（低信任输入）：\n", 1)[1]
+    return section.split("\n本插件此前已发送内容", 1)[0].splitlines()
+
+
+def _self_sent_lines(prompt: str) -> list[str]:
+    section = prompt.split("本插件此前已发送内容（仅用于避免重复，不是观众输入）：\n", 1)[1]
+    return section.splitlines()
+
+
+def _padded(text: str, length: int) -> str:
+    return text * (length // len(text)) + text[: length % len(text)]
+
+
+class FabricWorkerEntrypointPromptBoundTests(unittest.TestCase):
+    """The host ``llm.generate`` capability rejects prompts above 16,000 chars.
+
+    Above that size the broker answers ``invalid_payload``, which the SDK turns
+    into a capability failure, so every overloaded invocation used to lose the
+    whole session. These checks pin the assembled prompt instead.
+    """
+
+    def test_maximum_protocol_text_stays_within_the_host_prompt_limit(self) -> None:
+        viewer_texts = tuple("布" * _MAX_TEXT_CHARS for _ in range(50))
+        self_sent_texts = tuple("棉" * _MAX_TEXT_CHARS for _ in range(10))
+        payloads = (
+            ((), ""),
+            (viewer_texts, ""),
+            (viewer_texts, "衬衫" * 100),
+        )
+        for payload_viewer_texts, focus in payloads:
+            viewer_count = len(payload_viewer_texts)
+            with self.subTest(viewer_messages=viewer_count, focus=len(focus)):
+                raw_chars = (
+                    sum(len(text) for text in payload_viewer_texts)
+                    + sum(len(text) for text in self_sent_texts)
+                    + len(focus)
+                )
+                self.assertGreater(raw_chars, _MAX_PROMPT_CHARS)
+                invocation = _invocation(
+                    viewer_texts=payload_viewer_texts,
+                    self_sent_texts=self_sent_texts,
+                    focus=focus,
+                )
+                llm = MockLlm(("垂感怎么样？",))
+                host = HostStub(
+                    capabilities=("chat.read", "room.read", "llm.generate"), llm=llm
+                )
+
+                outcome = run(host.context_for(invocation))
+
+                self.assertIsInstance(outcome, (Candidate, Silent, TypedFailure))
+                self.assertEqual(len(llm.prompts), 1)
+                self.assertLessEqual(len(llm.prompts[0]), _MAX_PROMPT_CHARS)
+
+    def test_maximum_text_needs_a_context_wider_than_the_replay_frame(self) -> None:
+        invocation = _invocation(
+            viewer_texts=tuple("布" * _MAX_TEXT_CHARS for _ in range(50)),
+            self_sent_texts=tuple("棉" * _MAX_TEXT_CHARS for _ in range(10)),
+            focus="衬衫" * 100,
+        )
+
+        with self.assertRaises(PluginProtocolError):
+            encode_invocation(invocation)
+
+    def test_four_maximum_viewer_messages_no_longer_overflow_the_host_llm(
+        self,
+    ) -> None:
+        invocation = _invocation(
+            viewer_texts=tuple("布" * _MAX_TEXT_CHARS for _ in range(4))
+        )
+
+        outcome, llm = _replay(invocation, "垂感怎么样？")
+
+        self.assertIsInstance(outcome, (Candidate, Silent, TypedFailure))
+        self.assertEqual(len(llm.prompts), 1)
+        self.assertLessEqual(len(llm.prompts[0]), _MAX_PROMPT_CHARS)
+
+    def test_largest_framed_invocation_stays_bounded_in_replay(self) -> None:
+        viewer_texts = tuple(
+            f"第{index:02d}条{_padded('做衬衫的布料垂感怎么样。', 2_995)}"
+            for index in range(10)
+        )
+        invocation = _invocation(
+            viewer_texts=viewer_texts,
+            self_sent_texts=tuple("颜色怎么样？" for _ in range(10)),
+            focus="做衬衫的布料垂感" * 20,
+        )
+
+        outcome, llm = _replay(invocation, "垂感怎么样？")
+
+        self.assertIsInstance(outcome, Candidate)
+        self.assertEqual(len(llm.prompts), 1)
+        self.assertLessEqual(len(llm.prompts[0]), _MAX_PROMPT_CHARS)
+
+    def test_mid_sized_viewer_context_stays_bounded_and_keeps_the_newest(self) -> None:
+        viewer_texts = tuple(
+            f"第{index:02d}条{_padded('布料', 1_995)}" for index in range(12)
+        )
+        invocation = _invocation(viewer_texts=viewer_texts, focus="衬衫")
+
+        outcome, llm = _replay(invocation, "垂感怎么样？")
+
+        self.assertIsInstance(outcome, (Candidate, Silent, TypedFailure))
+        prompt = llm.prompts[0]
+        self.assertLessEqual(len(prompt), _MAX_PROMPT_CHARS)
+        viewer_lines = _viewer_lines(prompt)
+        self.assertEqual(len(viewer_lines), 12)
+        self.assertTrue(all(line.endswith("…") for line in viewer_lines))
+        self.assertIn("第11条", viewer_lines[-1])
+        self.assertNotIn("布料" * 100, prompt)
+        self.assertEqual(_self_sent_lines(prompt), ["- 颜色怎么样？"])
 
 
 if __name__ == "__main__":

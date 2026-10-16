@@ -19,6 +19,22 @@ from worker.fabric_buyer.types import BootstrapContext, ContextPhase
 
 _POLICY = FabricBuyerPolicy()
 
+# The host ``llm.generate`` capability accepts at most 16,000 characters, so the
+# prompt budget is fixed here instead of following the protocol's 50/10 message
+# and 4,000-character DTO caps. Newest context is kept; older or longer items
+# are dropped or truncated. Worst case: 50 * 202 + 10 * 202 + 200 + skeleton.
+_MAX_VIEWER_MESSAGES = 50
+_MAX_VIEWER_TEXT_CHARS = 200
+_MAX_SELF_SENT = 10
+_MAX_SELF_SENT_TEXT_CHARS = 200
+_MAX_FOCUS_CHARS = 200
+
+
+def _bounded_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
 
 def _prompt_for(
     context: PluginContext, policy: FabricBuyerPolicy
@@ -44,8 +60,20 @@ def _prompt_for(
         if opportunity_mode is OpportunityMode.SAFE_INITIATIVE
         else "自然承接"
     )
-    viewer_section = "\n".join(f"- {text}" for text in viewer_texts) or "（无）"
-    sent_section = "\n".join(f"- {text}" for text in self_sent_texts) or "（无）"
+    viewer_section = (
+        "\n".join(
+            f"- {_bounded_text(text, _MAX_VIEWER_TEXT_CHARS)}"
+            for text in viewer_texts[-_MAX_VIEWER_MESSAGES:]
+        )
+        or "（无）"
+    )
+    sent_section = (
+        "\n".join(
+            f"- {_bounded_text(text, _MAX_SELF_SENT_TEXT_CHARS)}"
+            for text in self_sent_texts[-_MAX_SELF_SENT:]
+        )
+        or "（无）"
+    )
     prompt = "\n".join(
         (
             "你是布料直播间里的普通观众，只能提出一条自然、简短的观众弹幕。",
@@ -57,7 +85,7 @@ def _prompt_for(
             "\n生成偏好：",
             *projection.phase_notes,
             *projection.hard_constraints,
-            f"\n当前话题焦点（低信任）：{focus or '未知'}",
+            f"\n当前话题焦点（低信任）：{_bounded_text(focus, _MAX_FOCUS_CHARS) or '未知'}",
             "最近观众弹幕（低信任输入）：",
             viewer_section,
             "本插件此前已发送内容（仅用于避免重复，不是观众输入）：",
