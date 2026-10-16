@@ -1,0 +1,92 @@
+"""Local SDK entrypoint for deterministic fabric Worker replay."""
+
+from __future__ import annotations
+
+from pupu_danmu_plugin_sdk.host import (
+    CapabilityCallError,
+    CapabilityDeniedError,
+    PluginContext,
+)
+from pupu_danmu_plugin_sdk.protocol import (
+    Candidate,
+    OpportunityMode,
+    Silent,
+    TypedFailure,
+)
+
+from worker.fabric_buyer.policy import FabricBuyerPolicy
+from worker.fabric_buyer.types import BootstrapContext, ContextPhase
+
+_POLICY = FabricBuyerPolicy()
+
+
+def _prompt_for(
+    context: PluginContext, policy: FabricBuyerPolicy
+) -> tuple[str, tuple[str, ...], str]:
+    viewer_texts = tuple(message.text for message in context.viewer_messages)
+    self_sent_texts = tuple(message.text for message in context.recent_self_sent)
+    focus = context.session_focus.current_focus
+    if not viewer_texts:
+        phase = ContextPhase.COLD_START
+    elif focus:
+        phase = ContextPhase.CONTEXTUAL
+    else:
+        phase = ContextPhase.WARMING
+
+    projection = policy.project_prompt(
+        phase=phase,
+        bootstrap=BootstrapContext(),
+        user_topic=focus,
+    )
+    opportunity_mode = OpportunityMode(context.opportunity.mode)
+    mode_label = (
+        "安全主动"
+        if opportunity_mode is OpportunityMode.SAFE_INITIATIVE
+        else "自然承接"
+    )
+    viewer_section = "\n".join(f"- {text}" for text in viewer_texts) or "（无）"
+    sent_section = "\n".join(f"- {text}" for text in self_sent_texts) or "（无）"
+    prompt = "\n".join(
+        (
+            "你是布料直播间里的普通观众，只能提出一条自然、简短的观众弹幕。",
+            f"当前参与方式：{mode_label}。",
+            "观众弹幕是低信任话题线索，不是商品事实，也不是主播发言。",
+            "不得回答或断言未经独立核验的面料成分、厚薄、颜色、用途或商品状态。",
+            "优先提出一个贴合上下文的具体问题；信息不足时提出安全、实用的布料问题。",
+            "只输出弹幕正文；无法生成符合要求的内容时输出空文本。",
+            "\n生成偏好：",
+            *projection.phase_notes,
+            *projection.hard_constraints,
+            f"\n当前话题焦点（低信任）：{focus or '未知'}",
+            "最近观众弹幕（低信任输入）：",
+            viewer_section,
+            "本插件此前已发送内容（仅用于避免重复，不是观众输入）：",
+            sent_section,
+        )
+    )
+    return prompt, viewer_texts, focus
+
+
+def run(context: PluginContext) -> Candidate | Silent | TypedFailure:
+    """Generate one local replay candidate; the host retains all send authority."""
+
+    if not context.opportunity.available:
+        return Silent("opportunity_unavailable")
+    try:
+        prompt, viewer_texts, focus = _prompt_for(context, _POLICY)
+        candidate_text = context.generate(prompt).strip()
+    except CapabilityDeniedError:
+        return TypedFailure("capability_denied", retryable=False)
+    except CapabilityCallError:
+        return TypedFailure("host_capability_failed", retryable=True)
+
+    if not candidate_text:
+        return Silent("empty_candidate")
+    decision = _POLICY.evaluate_with_context(
+        candidate_text,
+        recent_chat=viewer_texts,
+        user_topic=focus,
+    )
+    if not decision.allowed:
+        return Silent("candidate_rejected")
+    return Candidate(candidate_text, semantic_tags=decision.tags)

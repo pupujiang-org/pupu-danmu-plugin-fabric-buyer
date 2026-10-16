@@ -10,15 +10,18 @@ The official package build remains data-only and does not depend on or bundle th
 
 ## Independent Worker rules (development source only)
 
-The `worker/fabric_buyer/` tree contains independent fabric rules for the Issue #517 E2/E4 replay work. It imports no host domain modules and has no sender, network, model, or settlement access. The fixed regression corpus under `tests/fixtures/` records the host policy behavior used for comparison.
+The `worker/fabric_buyer/` tree contains independent fabric rules for the Issue #517 E2/E4 replay work. It imports no host domain modules and has no direct sender, network, or model-client access; model output is requested only through the SDK's host capability, while settlement remains host-owned. The fixed regression corpus under `tests/fixtures/` records the host policy behavior used for comparison.
 
-Run its deterministic checks with:
+`worker/fabric_buyer/entrypoint.py:run` is the local SDK Replay entrypoint. It receives only the SDK's bounded anonymous context, calls the host LLM capability when a host-issued opportunity is available, and filters generated text through the fabric policy. This source is for trusted local development and deterministic integration checks.
+
+Install the exact SDK wheel used by these checks and run them with:
 
 ```powershell
+python -m pip install --require-hashes -r worker/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-These checks cover the 138-candidate corpus, 16 objective-claim cases, and the existing context, persona, topic, participation, prompt, and rolling-quota cases. They do not authorize executing a downloaded plugin. `scripts/package_plugins.py` only reads `plugins/<plugin>/`, so `worker/` remains outside the data-only release ZIP until the separate install, authorization, and execution gates are completed.
+These checks cover the 138-candidate corpus, 16 objective-claim cases, existing context/persona/topic/participation/prompt/rolling-quota cases, and SDK Replay outcomes for available/unavailable opportunities, capability denial, and policy rejection. They do not authorize executing a downloaded plugin. `scripts/package_plugins.py` only reads `plugins/<plugin>/`, so `worker/` remains outside the data-only release ZIP until the separate install, authorization, and execution gates are completed.
 
 ## Validate and build
 

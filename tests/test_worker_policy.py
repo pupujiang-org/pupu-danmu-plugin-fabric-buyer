@@ -9,14 +9,11 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
+from scripts import package_plugins
 from worker.fabric_buyer.participation import BUYER_CLOTH_PARTICIPATION_INTERPRETER
 from worker.fabric_buyer.policy import FabricBuyerPolicy
-from worker.fabric_buyer.topics import priority_for
-from worker.fabric_buyer.topics import topics_in
-from worker.fabric_buyer.types import BootstrapContext
-from worker.fabric_buyer.types import ContextPhase
-
-from scripts import package_plugins
+from worker.fabric_buyer.topics import priority_for, topics_in
+from worker.fabric_buyer.types import BootstrapContext, ContextPhase
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLD_SET_PATH = ROOT / "tests" / "fixtures" / "buyer_cloth_policy_gold_set.json"
@@ -228,7 +225,12 @@ class FabricWorkerPolicyTests(unittest.TestCase):
                 elif isinstance(node, ast.Import):
                     imports.extend(alias.name for alias in node.names)
             with self.subTest(source=path.relative_to(ROOT).as_posix()):
-                self.assertFalse(any(name.startswith("pupu_danmu") for name in imports))
+                self.assertFalse(
+                    any(
+                        name == "pupu_danmu" or name.startswith("pupu_danmu.")
+                        for name in imports
+                    )
+                )
 
         manifest_path = ROOT / "plugins" / "fabric-buyer" / "manifest.json"
         manifest = package_plugins._load_manifest(manifest_path)

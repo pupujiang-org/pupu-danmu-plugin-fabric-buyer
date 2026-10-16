@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
+      - name: Install the pinned SDK for local Worker checks
+        run: python3 -m pip install --require-hashes -r worker/requirements.txt
       - name: Validate static package source and MIT licensing
         run: python3 scripts/package_plugins.py --check
       - name: Run Worker policy parity regressions
