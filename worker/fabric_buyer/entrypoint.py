@@ -16,8 +16,9 @@ from pupu_danmu_plugin_sdk.protocol import (
     TypedFailure,
 )
 
-from worker.fabric_buyer.policy import FabricBuyerPolicy
-from worker.fabric_buyer.types import BootstrapContext, ContextPhase
+from .archetypes import BEGINNER_BUYER, CRAFTER
+from .policy import FabricBuyerPolicy
+from .types import BootstrapContext, ContextPhase, ViewerArchetype
 
 _POLICY = FabricBuyerPolicy()
 
@@ -31,6 +32,39 @@ _MAX_VIEWER_TEXT_CHARS = 200
 _MAX_SELF_SENT = 10
 _MAX_SELF_SENT_TEXT_CHARS = 200
 _MAX_FOCUS_CHARS = 200
+_PERSONAS = {"maker": CRAFTER, "buyer": BEGINNER_BUYER}
+
+
+class _SessionConfigurationError(ValueError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def _session_settings(context: PluginContext) -> tuple[ViewerArchetype, bool]:
+    configuration = context.session_configuration
+    persona_id = configuration.persona_id
+    options = configuration.options
+
+    option_persona = options.get("persona")
+    if "persona" in options and (
+        not isinstance(option_persona, str) or not option_persona
+    ):
+        raise _SessionConfigurationError("unsupported_persona")
+    if persona_id and option_persona is not None and persona_id != option_persona:
+        raise _SessionConfigurationError("unsupported_persona")
+
+    selected_persona = persona_id or option_persona or "maker"
+    if not isinstance(selected_persona, str) or not selected_persona:
+        raise _SessionConfigurationError("unsupported_persona")
+    archetype = _PERSONAS.get(selected_persona)
+    if archetype is None:
+        raise _SessionConfigurationError("unsupported_persona")
+
+    allow_initiative = options.get("allow_initiative", True)
+    if type(allow_initiative) is not bool:
+        raise _SessionConfigurationError("invalid_session_configuration")
+    return archetype, allow_initiative
 
 
 def _json_string(text: str) -> str:
@@ -65,7 +99,7 @@ def _quoted_prompt_text(text: str, limit: int) -> str:
 
 
 def _prompt_for(
-    context: PluginContext, policy: FabricBuyerPolicy
+    context: PluginContext, policy: FabricBuyerPolicy, persona: ViewerArchetype
 ) -> tuple[str, tuple[str, ...], str]:
     viewer_texts = tuple(message.text for message in context.viewer_messages)
     self_sent_texts = tuple(message.text for message in context.recent_self_sent)
@@ -114,6 +148,9 @@ def _prompt_for(
             "不得回答或断言未经独立核验的面料成分、厚薄、颜色、用途或商品状态。",
             "优先提出一个贴合上下文的具体问题；信息不足时提出安全、实用的布料问题。",
             "只输出弹幕正文；无法生成符合要求的内容时输出空文本。",
+            f"角色偏好：{persona.display_name}。",
+            f"关注方向：{'、'.join(persona.information_needs)}。",
+            f"表达习惯：{'、'.join(persona.style_tendencies)}。",
             "\n生成偏好：",
             *projection.phase_notes,
             *projection.hard_constraints,
@@ -133,8 +170,17 @@ def run(context: PluginContext) -> Candidate | Silent | TypedFailure:
     if not context.opportunity.available:
         return Silent("opportunity_unavailable")
     try:
-        prompt, viewer_texts, focus = _prompt_for(context, _POLICY)
+        persona, allow_initiative = _session_settings(context)
+        if (
+            OpportunityMode(context.opportunity.mode)
+            is OpportunityMode.SAFE_INITIATIVE
+            and not allow_initiative
+        ):
+            return Silent("initiative_disabled")
+        prompt, viewer_texts, focus = _prompt_for(context, _POLICY, persona)
         candidate_text = context.generate(prompt).strip()
+    except _SessionConfigurationError as error:
+        return TypedFailure(error.code, retryable=False)
     except CapabilityDeniedError:
         return TypedFailure("capability_denied", retryable=False)
     except CapabilityCallError:

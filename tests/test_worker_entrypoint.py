@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
 
 from pupu_danmu_plugin_sdk.host import HostStub, MockLlm
 from pupu_danmu_plugin_sdk.protocol import (
@@ -14,6 +15,7 @@ from pupu_danmu_plugin_sdk.protocol import (
     OpportunityMode,
     PluginProtocolError,
     SelfSentMessage,
+    SessionConfiguration,
     SessionFocus,
     Silent,
     TypedFailure,
@@ -38,12 +40,19 @@ def _invocation(
     viewer_texts: tuple[str, ...] = ("做衬衫可以吗？",),
     self_sent_texts: tuple[str, ...] = ("颜色怎么样？",),
     focus: str | None = None,
+    persona: str | None = None,
+    allow_initiative: bool | None = None,
 ) -> Invocation:
     observed_at = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
     messages = tuple(
         ViewerMessage(f"viewer-{index}", text, observed_at)
         for index, text in enumerate(viewer_texts)
     )
+    options: dict[str, object] = {}
+    if persona is not None:
+        options["persona"] = persona
+    if allow_initiative is not None:
+        options["allow_initiative"] = allow_initiative
     return Invocation(
         invocation_id="invocation-1",
         session_id="session-1",
@@ -57,6 +66,9 @@ def _invocation(
             else ("衬衫" if viewer_texts else "")
         ),
         opportunity=Opportunity(mode=mode, available=available),
+        session_configuration=SessionConfiguration(
+            persona_id=persona or "", options=options
+        ),
         recent_self_sent=tuple(
             SelfSentMessage(text, datetime(2026, 10, 16, 7, 59, tzinfo=UTC))
             for text in self_sent_texts
@@ -67,7 +79,12 @@ def _invocation(
 def _replay(
     invocation: Invocation,
     *responses: str,
-    capabilities: tuple[str, ...] = ("chat.read", "room.read", "llm.generate"),
+    capabilities: tuple[str, ...] = (
+        "chat.read",
+        "room.read",
+        "llm.generate",
+        "session.config.read",
+    ),
 ) -> tuple[object, MockLlm]:
     llm = MockLlm(responses)
     host = HostStub(capabilities=capabilities, llm=llm)
@@ -98,7 +115,10 @@ class FabricWorkerEntrypointTests(unittest.TestCase):
         self.assertEqual(llm.prompts, [])
 
     def test_missing_llm_capability_fails_closed(self) -> None:
-        outcome, llm = _replay(_invocation(), capabilities=("chat.read", "room.read"))
+        outcome, llm = _replay(
+            _invocation(),
+            capabilities=("chat.read", "room.read", "session.config.read"),
+        )
 
         self.assertEqual(outcome, TypedFailure("capability_denied"))
         self.assertEqual(llm.prompts, [])
@@ -119,6 +139,68 @@ class FabricWorkerEntrypointTests(unittest.TestCase):
         self.assertIn("安全主动", llm.prompts[0])
         self.assertIn('当前话题焦点（低信任）："未知"', llm.prompts[0])
         self.assertNotIn("做衬衫可以吗？", llm.prompts[0])
+
+    def test_maker_persona_uses_the_existing_crafter_archetype(self) -> None:
+        outcome, llm = _replay(_invocation(persona="maker"), "垂感怎么样？")
+
+        self.assertIsInstance(outcome, Candidate)
+        self.assertIn("角色偏好：手作人", llm.prompts[0])
+        self.assertIn("是否好裁", llm.prompts[0])
+
+    def test_buyer_persona_uses_the_existing_beginner_buyer_archetype(self) -> None:
+        outcome, llm = _replay(_invocation(persona="buyer"), "垂感怎么样？")
+
+        self.assertIsInstance(outcome, Candidate)
+        self.assertIn("角色偏好：入门买布用户", llm.prompts[0])
+        self.assertIn("简单、明确的基础参数", llm.prompts[0])
+
+    def test_missing_persona_defaults_to_maker(self) -> None:
+        outcome, llm = _replay(_invocation(), "垂感怎么样？")
+
+        self.assertIsInstance(outcome, Candidate)
+        self.assertIn("角色偏好：手作人", llm.prompts[0])
+
+    def test_unknown_persona_fails_closed_before_calling_the_model(self) -> None:
+        outcome, llm = _replay(_invocation(persona="seller"), "垂感怎么样？")
+
+        self.assertEqual(outcome, TypedFailure("unsupported_persona"))
+        self.assertEqual(llm.prompts, [])
+
+    def test_disabled_initiative_suppresses_safe_initiative_only(self) -> None:
+        invocation = _invocation(
+            mode=OpportunityMode.SAFE_INITIATIVE,
+            viewer_texts=(),
+            allow_initiative=False,
+        )
+        outcome, llm = _replay(invocation, "有适合做发圈的布料吗？")
+
+        self.assertEqual(outcome, Silent("initiative_disabled"))
+        self.assertEqual(llm.prompts, [])
+
+    def test_disabled_initiative_keeps_contextual_opportunities(self) -> None:
+        invocation = _invocation(allow_initiative=False)
+        outcome, llm = _replay(invocation, "垂感怎么样？")
+
+        self.assertIsInstance(outcome, Candidate)
+        self.assertEqual(len(llm.prompts), 1)
+
+
+class FabricWorkerManifestTests(unittest.TestCase):
+    def test_manifest_declares_the_session_persona_and_initiative_options(self) -> None:
+        manifest_path = Path(__file__).resolve().parents[1] / "worker" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(manifest["schema_version"], 2)
+        self.assertEqual(manifest["runtime_type"], "python-worker")
+        self.assertIn("session.config.read", manifest["capabilities"])
+        self.assertEqual(manifest["entrypoint"], "fabric_buyer.entrypoint:run")
+        self.assertEqual(
+            manifest["config_schema"]["persona"]["options"], ["maker", "buyer"]
+        )
+        self.assertEqual(manifest["config_schema"]["persona"]["default"], "maker")
+        self.assertIs(
+            manifest["config_schema"]["allow_initiative"]["default"], True
+        )
 
 
 def _viewer_lines(prompt: str) -> list[str]:
@@ -163,7 +245,13 @@ class FabricWorkerEntrypointPromptBoundTests(unittest.TestCase):
 
         llm = MockLlm(("垂感怎么样？",))
         host = HostStub(
-            capabilities=("chat.read", "room.read", "llm.generate"), llm=llm
+            capabilities=(
+                "chat.read",
+                "room.read",
+                "llm.generate",
+                "session.config.read",
+            ),
+            llm=llm,
         )
         outcome = run(host.context_for(invocation))
 
@@ -186,7 +274,13 @@ class FabricWorkerEntrypointPromptBoundTests(unittest.TestCase):
         )
         llm = MockLlm(("垂感怎么样？",))
         host = HostStub(
-            capabilities=("chat.read", "room.read", "llm.generate"), llm=llm
+            capabilities=(
+                "chat.read",
+                "room.read",
+                "llm.generate",
+                "session.config.read",
+            ),
+            llm=llm,
         )
 
         outcome = run(host.context_for(invocation))
@@ -235,7 +329,13 @@ class FabricWorkerEntrypointPromptBoundTests(unittest.TestCase):
                 )
                 llm = MockLlm(("垂感怎么样？",))
                 host = HostStub(
-                    capabilities=("chat.read", "room.read", "llm.generate"), llm=llm
+                    capabilities=(
+                        "chat.read",
+                        "room.read",
+                        "llm.generate",
+                        "session.config.read",
+                    ),
+                    llm=llm,
                 )
 
                 outcome = run(host.context_for(invocation))

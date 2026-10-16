@@ -6,7 +6,7 @@ The package does not replace the host's existing fabric-specific runtime strateg
 
 ## Python SDK reference
 
-The official package build remains data-only and does not depend on or bundle the SDK. The deterministic rules in `worker/` are development source; host protocol and Worker replay use the standalone [Pupu Danmu Plugin SDK v0.2.0](https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/tag/v0.2.0). The Worker source is not included in any plugin ZIP and does not enable Registry installation or remote execution.
+The official package build remains data-only and does not depend on or bundle the SDK. The deterministic rules in `worker/` are development source; Worker replay uses the exact SDK development commit [`42407f8`](https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/commit/42407f883c6db880002438b50333c5d55da523bb), which adds protocol v3 session configuration. This is not an SDK release. The Worker source is not included in any plugin ZIP and does not enable Registry installation or remote execution.
 
 ## Independent Worker rules (development source only)
 
@@ -14,14 +14,14 @@ The `worker/fabric_buyer/` tree contains independent fabric rules for the Issue 
 
 `worker/fabric_buyer/entrypoint.py:run` is the local SDK Replay entrypoint. It receives only the SDK's bounded anonymous context, calls the host LLM capability when a host-issued opportunity is available, and filters generated text through the fabric policy. This source is for trusted local development and deterministic integration checks.
 
-Install the exact SDK wheel used by these checks and run them with:
+Install the exact SDK development commit used by these checks and run them with:
 
 ```powershell
-python -m pip install --require-hashes -r worker/requirements.txt
+python -m pip install -r worker/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-These checks cover the 138-candidate corpus, 16 objective-claim cases, existing context/persona/topic/participation/prompt/rolling-quota cases, and SDK Replay outcomes for available/unavailable opportunities, capability denial, and policy rejection. They do not authorize executing a downloaded plugin. `scripts/package_plugins.py` only reads `plugins/<plugin>/`, so `worker/` remains outside the data-only release ZIP until the separate install, authorization, and execution gates are completed.
+These checks cover the 138-candidate corpus, 16 objective-claim cases, existing context/persona/topic/participation/prompt/rolling-quota cases, and SDK Replay outcomes for persona selection, initiative gating, available/unavailable opportunities, capability denial, and policy rejection. They do not authorize executing a downloaded plugin. `scripts/package_plugins.py` only reads `plugins/<plugin>/`, so `worker/` remains outside the data-only release ZIP until the separate install, authorization, and execution gates are completed.
 
 ## Validate and build
 
