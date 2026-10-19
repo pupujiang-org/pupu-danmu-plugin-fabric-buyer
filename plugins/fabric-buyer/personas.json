@@ -4,6 +4,7 @@
     "interests": ["面料手感", "克重与垂感", "适用手工作品"],
     "topic_interests": [
       {"topic_id": "fabric_weight", "relevance": 90},
+      {"topic_id": "fabric_general", "relevance": 70},
       {"topic_id": "fabric_composition", "relevance": 75},
       {"topic_id": "usage_scene", "relevance": 70},
       {"topic_id": "color_pattern", "relevance": 60},
@@ -15,6 +16,7 @@
     "interests": ["商品规格", "洗护方式", "适用场景"],
     "topic_interests": [
       {"topic_id": "fabric_composition", "relevance": 80},
+      {"topic_id": "fabric_general", "relevance": 75},
       {"topic_id": "care_instructions", "relevance": 75},
       {"topic_id": "usage_scene", "relevance": 70},
       {"topic_id": "fabric_weight", "relevance": 65},

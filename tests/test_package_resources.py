@@ -75,6 +75,31 @@ class PackageResourceTests(unittest.TestCase):
                 self.assertNotIn(" ", entry["label"])
                 self.assertTrue(entry["label"].isprintable())
 
+    def test_general_fabric_topic_covers_real_live_chat(self) -> None:
+        entry = next(
+            entry for entry in self.topics["topics"] if entry["id"] == "fabric_general"
+        )
+        tokens = (entry["label"], *entry["aliases"])
+        for text in ("什么布料", "啥料的", "工装裤面料有吗"):
+            with self.subTest(text=text):
+                self.assertTrue(any(token in text for token in tokens))
+
+    def test_aliases_are_specific_enough_to_be_matchable(self) -> None:
+        for entry in self.topics["topics"]:
+            for alias in entry["aliases"]:
+                with self.subTest(topic=entry["id"], alias=alias):
+                    self.assertGreaterEqual(len(alias), 2)
+
+    def test_broad_fabric_aliases_leave_unrelated_text_alone(self) -> None:
+        tokens = [
+            token
+            for entry in self.topics["topics"]
+            for token in (entry["label"], *entry["aliases"])
+        ]
+        for text in ("分布很广", "塑料制品", "材料说明", "发布公告", "这块地板"):
+            with self.subTest(text=text):
+                self.assertFalse(any(token in text for token in tokens))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "org.pupujiang.fabric-buyer",
   "name": "布料买家",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "布料直播场景的官方声明式角色与主题资源包。",
   "author": "pupujiang",
   "license": "MIT",
@@ -10,14 +10,22 @@
   "kind": "ai-participation",
   "runtime_type": "declarative",
   "plugin_api_version": 1,
-  "capabilities": ["chat_context", "host_llm", "persona", "topic_hints"],
+  "capabilities": [
+    "chat_context",
+    "host_llm",
+    "persona",
+    "topic_hints"
+  ],
   "config_schema": {
     "persona": {
       "type": "select",
       "label": "观众角色",
       "description": "仅在当前会话中使用。",
       "required": true,
-      "options": ["maker", "buyer"],
+      "options": [
+        "maker",
+        "buyer"
+      ],
       "default": "maker"
     },
     "allow_initiative": {
