@@ -1,46 +1,41 @@
 # 官方插件：布料买家
 
-This is the official source repository for `org.pupujiang.fabric-buyer`. The package is MIT licensed and contains declarative personas, topic hints, and a low-trust prompt resource for fabric live rooms.
+This MIT-licensed repository maintains two releases for the official plugin id `org.pupujiang.fabric-buyer`:
 
-The package does not replace the host's existing fabric-specific runtime strategy. An independent deterministic Worker policy source is now tracked under `worker/` and checked against the host behavior corpus, but the official v1.0.0 ZIP remains data-only. The host keeps its existing policy until the code package, authorization flow, and migration gates are separately completed. The Registry will list a version only after its Release asset and host compatibility have been reviewed.
+| Release | Source | Version | Runtime |
+| --- | --- | --- | --- |
+| Declarative data package | `plugins/fabric-buyer/` | `1.2.0` | Manifest v1, data only |
+| Python Worker package | `worker/` | `1.3.0` | Manifest v2, Python Worker API v2 |
 
-## Python SDK reference
+The catalog identifies a release by plugin id and exact version. The two runtime versions can therefore coexist without changing the existing declarative release. The Worker does not replace the host's fabric policy implementation.
 
-The official package build remains data-only and does not depend on or bundle the SDK. The deterministic rules in `worker/` are development source; Worker replay uses the exact SDK development commit [`42407f8`](https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/commit/42407f883c6db880002438b50333c5d55da523bb), which adds protocol v3 session configuration. This is not an SDK release. The Worker source is not included in any plugin ZIP and does not enable Registry installation or remote execution.
+## Python SDK and capabilities
 
-## Independent Worker rules (development source only)
+Worker replay uses the official [Python SDK v0.3.0 Release](https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/tag/v0.3.0), pinned by the wheel SHA-256 in `worker/requirements.txt`. The Worker source is not bundled with the SDK and has no direct sender, network, or model-client access.
 
-The `worker/fabric_buyer/` tree contains independent fabric rules for the Issue #517 E2/E4 replay work. It imports no host domain modules and has no direct sender, network, or model-client access; model output is requested only through the SDK's host capability, while settlement remains host-owned. The fixed regression corpus under `tests/fixtures/` records the host policy behavior used for comparison.
+The schema-v2 manifest requests `chat.read`, `room.read`, `llm.generate`, and `session.config.read`. The host supplies per-session capabilities and retains platform sending, pacing, room reservation and settlement, package provenance checks, and Windows AppContainer plus Job isolation. Publishing this ZIP does not by itself expose Worker selection in the desktop UI or authorize a session.
 
-`worker/fabric_buyer/entrypoint.py:run` is the local SDK Replay entrypoint. It receives only the SDK's bounded anonymous context, calls the host LLM capability when a host-issued opportunity is available, and filters generated text through the fabric policy. This source is for trusted local development and deterministic integration checks.
+## Validate and package
 
-Install the exact SDK development commit used by these checks and run them with:
+Use Python 3.13 for Worker checks:
 
 ```powershell
 python -m pip install -r worker/requirements.txt
+python scripts/package_plugins.py --check
+python scripts/package_worker.py --check --expected-version 1.3.0
 python -m unittest discover -s tests -v
 ```
 
-These checks cover the 138-candidate corpus, 16 objective-claim cases, existing context/persona/topic/participation/prompt/rolling-quota cases, and SDK Replay outcomes for persona selection, initiative gating, available/unavailable opportunities, capability denial, and policy rejection. They do not authorize executing a downloaded plugin. `scripts/package_plugins.py` only reads `plugins/<plugin>/`, so `worker/` remains outside the data-only release ZIP until the separate install, authorization, and execution gates are completed.
-
-## Validate and build
-
-The data-only package builder supports Python 3.10 or newer. Worker policy tests use Python 3.13, matching the host's current Worker runtime.
-
+The Worker package builder reads and parses source files but never imports or executes them. It writes a deterministic `fabric-buyer-1.3.0.zip` and a `.sha256` sidecar when asked to build:
 
 ```powershell
-python scripts/package_plugins.py --check
-python scripts/package_plugins.py --plugin fabric-buyer --output dist --expected-version 1.0.0
+python scripts/package_worker.py --output dist-worker --expected-version 1.3.0
 ```
 
-The package command writes `fabric-buyer-1.0.0.zip` and its `.sha256` sidecar to the output directory. These generated files are Release artifacts and must not be committed to this repository.
+The declarative v1.2.0 package remains separately buildable with `scripts/package_plugins.py`. Generated ZIPs and checksum files are Release assets and must not be committed.
 
-Use the `.sha256` asset attached to the GitHub Release when preparing a Registry entry. Locally generated ZIP bytes can differ across operating systems because ZIP metadata and compression implementations vary; the Release asset and its digest are authoritative.
+## Release and Registry
 
-## Publish
+Push the matching `fabric-buyer-v1.3.0` tag only after the package tests and validation pass. The release workflow builds from that tag and publishes the exact ZIP and checksum as Release assets. The Registry entry must use the official Release URL, exact byte size, SHA-256, Worker manifest, and reviewed minimum host version; the builder statically validates the package and does not execute it.
 
-After an explicitly approved version is ready, push the matching `fabric-buyer-v<version>` tag. GitHub Actions builds the ZIP and checksum from that tag and publishes both assets to its GitHub Release. A separate reviewed Registry entry is required before the host market can offer the version.
-
-## License
-
-This source repository is MIT licensed. The plugin package includes the same MIT license text.
+The source repository is MIT licensed. The Worker ZIP includes the same MIT license text.
