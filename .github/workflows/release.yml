@@ -31,18 +31,22 @@ jobs:
           worker_version="$(python3 -c 'import json; print(json.load(open("worker/manifest.json", encoding="utf-8"))["version"])')"
           if [[ "$version" == "$worker_version" ]]; then
             python3 scripts/package_worker.py --output dist --expected-version "$version"
+            package_kind="Python Worker"
           elif [[ "$version" == "$data_version" ]]; then
             python3 scripts/package_plugins.py --plugin fabric-buyer --output dist --expected-version "$version"
+            package_kind="declarative data-only plugin"
           else
             echo "release tag does not match a declarative or Worker manifest" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "kind=$package_kind" >> "$GITHUB_OUTPUT"
       - name: Publish ZIP and SHA-256 as Release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ steps.package.outputs.version }}
+          RELEASE_KIND: ${{ steps.package.outputs.kind }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
           gh release create "$RELEASE_TAG" \
@@ -50,4 +54,4 @@ jobs:
             "dist/fabric-buyer-$RELEASE_VERSION.zip.sha256" \
             --verify-tag \
             --title "fabric-buyer $RELEASE_VERSION" \
-            --notes "Official static data-only plugin package built from $RELEASE_SHA. The Registry validates the exact asset size and SHA-256 before cataloging."
+            --notes "Official $RELEASE_KIND package built from $RELEASE_SHA. The Registry validates the exact asset size and SHA-256 before cataloging. Python Workers run only through the host's verified sandbox after explicit session authorization."
