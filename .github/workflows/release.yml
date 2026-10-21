@@ -31,27 +31,26 @@ jobs:
           worker_version="$(python3 -c 'import json; print(json.load(open("worker/manifest.json", encoding="utf-8"))["version"])')"
           if [[ "$version" == "$worker_version" ]]; then
             python3 scripts/package_worker.py --output dist --expected-version "$version"
-            package_kind="Python Worker"
+            release_notes="Official Python Worker package built from $GITHUB_SHA. The host launches Workers only in its verified Windows AppContainer and Job sandbox after explicit session authorization. The Registry validates the exact asset size and SHA-256 before cataloging."
           elif [[ "$version" == "$data_version" ]]; then
             python3 scripts/package_plugins.py --plugin fabric-buyer --output dist --expected-version "$version"
-            package_kind="declarative data-only plugin"
+            release_notes="Official declarative data-only plugin package built from $GITHUB_SHA. It contains no executable Worker source. The Registry validates the exact asset size and SHA-256 before cataloging."
           else
             echo "release tag does not match a declarative or Worker manifest" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "kind=$package_kind" >> "$GITHUB_OUTPUT"
+          echo "notes=$release_notes" >> "$GITHUB_OUTPUT"
       - name: Publish ZIP and SHA-256 as Release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ steps.package.outputs.version }}
-          RELEASE_KIND: ${{ steps.package.outputs.kind }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_NOTES: ${{ steps.package.outputs.notes }}
         run: |
           gh release create "$RELEASE_TAG" \
             "dist/fabric-buyer-$RELEASE_VERSION.zip" \
             "dist/fabric-buyer-$RELEASE_VERSION.zip.sha256" \
             --verify-tag \
             --title "fabric-buyer $RELEASE_VERSION" \
-            --notes "Official $RELEASE_KIND package built from $RELEASE_SHA. The Registry validates the exact asset size and SHA-256 before cataloging. Python Workers run only through the host's verified sandbox after explicit session authorization."
+            --notes "$RELEASE_NOTES"
