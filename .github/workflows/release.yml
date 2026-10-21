@@ -14,12 +14,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.ref }}
-      - name: Build package from the tagged source
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Install the hash-pinned SDK and run package gates
+        run: |
+          python3 -m pip install -r worker/requirements.txt
+          python3 scripts/package_plugins.py --check
+          python3 -m unittest discover -s tests -v
+      - name: Build the package matching the release tag
         id: package
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#fabric-buyer-v}"
-          python3 scripts/package_plugins.py --plugin fabric-buyer --output dist --expected-version "$version"
+          data_version="$(python3 -c 'import json; print(json.load(open("plugins/fabric-buyer/manifest.json", encoding="utf-8"))["version"])')"
+          worker_version="$(python3 -c 'import json; print(json.load(open("worker/manifest.json", encoding="utf-8"))["version"])')"
+          if [[ "$version" == "$worker_version" ]]; then
+            python3 scripts/package_worker.py --output dist --expected-version "$version"
+          elif [[ "$version" == "$data_version" ]]; then
+            python3 scripts/package_plugins.py --plugin fabric-buyer --output dist --expected-version "$version"
+          else
+            echo "release tag does not match a declarative or Worker manifest" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Publish ZIP and SHA-256 as Release assets
         env:

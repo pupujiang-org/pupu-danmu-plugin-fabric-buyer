@@ -1,2 +1,2 @@
-# Exact development commit required for protocol v3 session configuration.
-pupu-danmu-plugin-sdk @ git+https://github.com/pupujiang-org/pupu-danmu-plugin-sdk.git@42407f883c6db880002438b50333c5d55da523bb
+# Verified SDK v0.3.0 release wheel required for protocol v3 session configuration.
+pupu-danmu-plugin-sdk @ https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/download/v0.3.0/pupu_danmu_plugin_sdk-0.3.0-py3-none-any.whl#sha256=add62b2baeecb6043a68fca55313f4fe755566b601b6e21fda622a5ea11bb718
